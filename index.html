@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>前橋市 地番図マップ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <style>
+    html, body, #map {
+      margin: 0; padding: 0; height: 100%; width: 100%;
+    }
+    #zoom-display {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255, 255, 255, 0.8);
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-family: sans-serif;
+      font-weight: bold;
+      font-size: 14px;
+      z-index: 1;
+    }
+    #layer-controls {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 8px;
+      font-family: sans-serif;
+      font-size: 12px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      z-index: 1;
+    }
+    #layer-controls label {
+      display: block;
+      margin-bottom: 5px;
+      cursor: pointer;
+    }
+    #layer-controls input[type="checkbox"] {
+      margin-right: 5px;
+    }
+    
+    /* Info ボタンのスタイル */
+    .info-control {
+      position: absolute;
+      top: 110px;
+      right: 10px;
+      z-index: 1;
+    }
+    
+    .info-button {
+      background: #ffffff;
+      border: none;
+      border-radius: 4px;
+      box-shadow: 0 0 0 2px rgba(0,0,0,.1);
+      cursor: pointer;
+      display: block;
+      font-size: 18px;
+      height: 29px;
+      line-height: 29px;
+      text-align: center;
+      text-decoration: none;
+      width: 29px;
+      color: #333;
+    }
+    
+    .info-button:hover {
+      background: #f2f2f2;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="zoom-display">ズームレベル : 14.5</div>
+  <div id="layer-controls">
+    <label>
+      <input type="checkbox" id="background-toggle" checked> 背景地図の表示
+    </label>
+  </div>
+  
+  <!-- Info ボタン -->
+  <div class="info-control">
+    <a href="info.html" target="_blank" rel="noopener noreferrer" class="info-button" title="このマップについて">ℹ</a>
+  </div>
+
+  <script src="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/pmtiles@3.0.3/dist/pmtiles.js"></script>
+  <script>
+    // PMTiles プロトコル登録
+    const protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol('pmtiles', protocol.tile);
+
+    // マップ初期化
+    const map = new maplibregl.Map({
+      container: 'map',
+      center: [139.06343, 36.38953],
+      zoom: 14.5,
+      style: {
+        version: 8,
+        glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+        sources: {
+          // 淡色地図
+          pale: {
+            type: 'raster',
+            tiles: ['https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png'],
+            tileSize: 256,
+            attribution: '地理院タイル（淡色）',
+            maxzoom: 18,
+          },
+          // シームレス写真（ズーム17以上で表示）
+          seamlessphoto: {
+            type: 'raster',
+            tiles: ['https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg'],
+            tileSize: 256,
+            attribution: '地理院シームレス写真',
+            maxzoom: 18,
+          },
+          // PMTiles
+          chibanzu: {
+            type: 'vector',
+            url: 'pmtiles://./tiles/chibanzu_maebashi.pmtiles',
+          },
+          genkeizu_polyline: {
+            type: 'vector',
+            url: 'pmtiles://./tiles/genkeizu_polyline.pmtiles',
+          },
+          genkeizu_polygon: {
+            type: 'vector',
+            url: 'pmtiles://./tiles/genkeizu_polygon.pmtiles',
+          },
+        },
+        layers: [
+          // 淡色地図（ベースレイヤー）
+          {
+            id: 'pale-layer',
+            type: 'raster',
+            source: 'pale',
+            minzoom: 0,
+            maxzoom: 18.0,
+          },
+          // シームレス写真（ズーム16.5〜）
+          {
+            id: 'seamlessphoto-layer',
+            type: 'raster',
+            source: 'seamlessphoto',
+            minzoom: 16.5,
+            maxzoom: 20.1,
+            paint: {
+              'raster-opacity': [
+                'interpolate', ['linear'], ['zoom'],
+                16.5, 0,
+                17.5, 0.6
+              ]
+            }
+          },
+          // genkeizu polygon - 枠線のみ
+          {
+            id: 'genkeizu-polygon',
+            type: 'line',
+            source: 'genkeizu_polygon',
+            'source-layer': 'genkeizu_polygon-layer',
+            maxzoom: 20.1,
+            paint: {
+              'line-color': '#2e5433',
+              'line-width': 1.4
+            }
+          },
+          // genkeizu polyline
+          {
+            id: 'genkeizu-polyline',
+            type: 'line',
+            source: 'genkeizu_polyline',
+            'source-layer': 'genkeizu_polyline-layer',
+            maxzoom: 20.1,
+            paint: {
+              'line-color': '#2e5433',
+              'line-width': 1.2
+            }
+          },
+          // chibanzu（地番図）- 枠線のみ（最上位）
+          {
+            id: 'chibanzu-line',
+            type: 'line',
+            source: 'chibanzu',
+            'source-layer': 'chibanzu_maebashi-layer',
+            minzoom: 15,
+            paint: {
+              'line-color': '#d34eed', // 地番図の色
+              'line-width': 1.6,
+              'line-opacity': [
+                'interpolate', ['linear'], ['zoom'],
+                15, 0,    // ズーム15で透過度0（薄く表示）
+                16.5, 1     // ズーム16.5で透過度1（完全表示）
+              ]
+            }
+          },
+          // chibanzu テキスト表示（最上位）
+          {
+            id: 'chibanzu-text',
+            type: 'symbol',
+            source: 'chibanzu',
+            'source-layer': 'chibanzu_maebashi-layer',
+            minzoom: 18.1,
+            layout: {
+              'text-field': ['get', '表示名称'],
+              'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+              'text-size': 18,
+              'text-anchor': 'center'
+            },
+            paint: {
+              'text-color': '#d34eed', // 地番図の色
+              'text-halo-color': 'rgba(255, 255, 255, 0.6)', // 半透明の白
+              'text-halo-width': 4
+            }
+          }
+        ]
+      }
+    });
+
+    // ズームレベル表示更新
+    const zoomDisplay = document.getElementById('zoom-display');
+    map.on('zoom', () => {
+      zoomDisplay.textContent = `ズームレベル : ${map.getZoom().toFixed(1)}`;
+    });
+
+    // ナビゲーションコントロール（拡大・縮小・回転・リセット）を追加
+    map.addControl(new maplibregl.NavigationControl({
+      showCompass: true,  // コンパス（回転リセット）を表示
+      showZoom: true,     // ズームボタンを表示
+      visualizePitch: true // ピッチの視覚化
+    }), 'top-right');
+
+    // GeoJSONの町境界を読み込み（枠線だけ）
+    map.on('load', () => {
+      map.addSource('maebashi-border', {
+        type: 'geojson',
+        data: './maebashi_border.geojson'
+      });
+
+      map.addLayer({
+        id: 'maebashi-border-line',
+        type: 'line',
+        source: 'maebashi-border',
+        maxzoom: 18,
+        paint: {
+          'line-color': '#5c5ee6',
+          'line-width': 2,
+          'line-opacity': [
+            'interpolate', ['linear'], ['zoom'],
+            16, 1,    // ズーム16まで完全表示
+            17, 1,    // ズーム17で透明化開始
+            18, 0     // ズーム18で完全透明（非表示）
+          ]
+        }
+      });
+
+      // 町境界のテキスト表示（ズーム10-14）
+      map.addLayer({
+        id: 'maebashi-border-text',
+        type: 'symbol',
+        source: 'maebashi-border',
+        minzoom: 10,
+        maxzoom: 14,
+        layout: {
+          'text-field': ['get', 'S_NAME'],
+          'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+          'text-size': 16,
+          'text-anchor': 'center'
+        },
+        paint: {
+          'text-color': '#5c5ee6',
+          'text-halo-color': 'rgba(255, 255, 255, 0.8)',
+          'text-halo-width': 2
+        }
+      });
+
+      // 町境界の透明fill（ズーム10-14、クリック用）
+      map.addLayer({
+        id: 'maebashi-border-fill',
+        type: 'fill',
+        source: 'maebashi-border',
+        minzoom: 10,
+        maxzoom: 14,
+        paint: {
+          'fill-color': 'transparent',
+          'fill-opacity': 0
+        }
+      });
+
+      // 選択されたポリゴンのハイライト表示用
+      map.addLayer({
+        id: 'maebashi-border-selected',
+        type: 'fill',
+        source: 'maebashi-border',
+        minzoom: 10,
+        maxzoom: 14,
+        paint: {
+          'fill-color': '#edad79',
+          'fill-opacity': 0.3,
+          'fill-outline-color': '#5c5ee6'
+        },
+        filter: ['==', 'S_NAME', ''] // 初期状態では何も選択されていない
+      });
+    });
+
+    // 背景地図の一括表示/非表示制御（透過度で制御）
+    document.getElementById('background-toggle').addEventListener('change', (e) => {
+      const opacity = e.target.checked ? 1 : 0;
+      
+      // 淡色地図の透過度制御
+      map.setPaintProperty('pale-layer', 'raster-opacity', opacity);
+      
+      // 航空写真の透過度制御（元の設定を考慮）
+      if (e.target.checked) {
+        // ONの場合：元の透過度設定を復元
+        map.setPaintProperty('seamlessphoto-layer', 'raster-opacity', [
+          'interpolate', ['linear'], ['zoom'],
+          16.5, 0,
+          17.5, 0.6
+        ]);
+      } else {
+        // OFFの場合：完全透明
+        map.setPaintProperty('seamlessphoto-layer', 'raster-opacity', 0);
+      }
+    });
+
+    // 町境界（透明fill）クリック時のポップアップ表示（ズーム10-14）
+    let selectedPolygon = null; // 選択されたポリゴンを管理
+    
+    map.on('click', 'maebashi-border-fill', (e) => {
+      const properties = e.features[0].properties;
+      const polygonName = properties.S_NAME;
+      
+      // 選択されたポリゴンをハイライト
+      selectedPolygon = polygonName;
+      map.setFilter('maebashi-border-selected', ['==', 'S_NAME', polygonName]);
+      
+      // 表示したい属性を選択（必要に応じて変更してください）
+      const displayFields = {
+        'S_NAME': '地区名',
+        'AREA': '面積',
+        '総人口': '人口',
+        '世帯数': '世帯数',
+        '男性': '男性', 
+        '女性': '女性',
+        // 他に表示したい属性があれば追加
+      };
+      
+      // 属性情報をHTMLで整形
+      let popupContent = '<div style="font-family: sans-serif; font-size: 12px;">';
+      popupContent += '<h3 style="margin: 0 0 10px 0;">地区情報</h3>';
+      
+      for (const [key, label] of Object.entries(displayFields)) {
+        const value = properties[key];
+        if (value !== null && value !== '' && value !== undefined) {
+          popupContent += `<div style="margin-bottom: 5px;"><strong>${label}:</strong> ${value}</div>`;
+        }
+      }
+      
+      popupContent += '</div>';
+      
+      // ポップアップを表示
+      new maplibregl.Popup()
+        .setLngLat(e.lngLat)
+        .setHTML(popupContent)
+        .addTo(map);
+    });
+
+    // 地図の他の場所をクリックした時に選択を解除
+    map.on('click', (e) => {
+      const features = map.queryRenderedFeatures(e.point, { 
+        layers: ['maebashi-border-fill'] 
+      });
+      
+      // クリックした場所に町境界がない場合、選択を解除
+      if (features.length === 0 && selectedPolygon) {
+        selectedPolygon = null;
+        map.setFilter('maebashi-border-selected', ['==', 'S_NAME', '']);
+      }
+    });
+
+    // マウスカーソルをポインターに変更（透明fill用）
+    map.on('mouseenter', 'maebashi-border-fill', () => {
+      map.getCanvas().style.cursor = 'pointer';
+    });
+
+    map.on('mouseleave', 'maebashi-border-fill', () => {
+      map.getCanvas().style.cursor = '';
+    });
+  </script>
+</body>
+</html>
